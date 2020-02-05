@@ -46,6 +46,8 @@ int main(int argc, char **argv)
         queue[MAX_QUEUE]=-1;
         queuePriority[MAX_QUEUE]=-1;
     }
+    
+    //TEST
 
 
 	sendmsg[0] = tid;
