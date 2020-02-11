@@ -47,8 +47,6 @@ int main(int argc, char **argv)
         queuePriority[MAX_QUEUE]=-1;
     }
     
-    //TEST
-
 
 	sendmsg[0] = tid;
 	sendmsg[1] = priority;
@@ -58,103 +56,206 @@ int main(int argc, char **argv)
         MPI_Send( sendmsg, 2, MPI_INT, i, MSG_REQUEST, MPI_COMM_WORLD );
     }
     
-
-    while(sizeMyProc!=size){
+    while(true){
+        while(sizeMyProc!=size){
+            
+            MPI_Recv(recvmsg, 2, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);  
         
-        MPI_Recv(recvmsg, 2, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);  
-        
-        switch(status.MPI_TAG){
-            case MSG_REQUEST:
-                printf("%d: Jest request!!\n", tid);	
-                if(!locked){
-                    locked = true;
-                    lockedTid = recvmsg[0];
-                    
-                    MPI_Send( sendmsg, 2, MPI_INT, recvmsg[0], MSG_LOCKED, MPI_COMM_WORLD );
-                } else {  
-                    bool isMoreImportant = true;
-                    for(int i=0;i<sizeMyProc;i++){                
-                        if(myProcPriority[i]>recvmsg[1]){
-                            isMoreImportant = false;
+            switch(status.MPI_TAG){
+                case MSG_REQUEST:
+                    printf("%d: Jest request!!\n", tid);	
+                    if(!locked){
+                        locked = true;
+                        lockedTid = recvmsg[0];
+                        
+                        MPI_Send( sendmsg, 2, MPI_INT, recvmsg[0], MSG_LOCKED, MPI_COMM_WORLD );
+                    } else {  
+                        bool isMoreImportant = true;
+                        for(int i=0;i<sizeMyProc;i++){                
+                            if(myProcPriority[i]>recvmsg[1]){
+                                isMoreImportant = false;
+                            }
+                        }
+                        
+                        queue[sizeQueue] = recvmsg[0];
+                        queuePriority[sizeQueue] = recvmsg[1];
+                        sizeQueue++;
+                        if(isMoreImportant){                    
+                            MPI_Send( sendmsg, 2, MPI_INT, lockedTid, MSG_INQUIRE, MPI_COMM_WORLD );
+                        } else {
+                            MPI_Send( sendmsg, 2, MPI_INT, recvmsg[0], MSG_FAILED, MPI_COMM_WORLD );
                         }
                     }
+                    break;
+                case MSG_INQUIRE:      
+                    printf("%d: Jest INQUIRE!!\n", tid);	
+                    if(failedCount>1){
+                        printf("%d: wysylkam RELINQUISH!!\n", tid);	
+                        locked = false;
+                        lockedTid=-1;
+                        MPI_Send( sendmsg, 2, MPI_INT, recvmsg[0], MSG_RELINQUISH, MPI_COMM_WORLD );   
+                        
+                        int maxPrio = -1;
+                        int maxPrioTid = -1;
+                        for(int i=0;i<sizeQueue;i++){                
+                            if(queuePriority[i]>maxPrio){
+                                maxPrio = queuePriority[i];
+                                maxPrioTid = queue[i];
+                            }
+                        }
+                        if(maxPrio>-1){      
+                            locked = true;
+                            lockedTid=maxPrioTid;
+                            MPI_Send( sendmsg, 2, MPI_INT, maxPrioTid, MSG_LOCKED, MPI_COMM_WORLD );   
+                            
+                            int newQueue[MAX_QUEUE];
+                            int newQueuePriority[MAX_QUEUE];
+                            int newSizeQueue = 0;
+                            
+                            for(int i=0;i<MAX_QUEUE;i++){
+                                newQueue[i]=-1;
+                                newQueuePriority[i]=-1;
+                            }
+                            
+                            for(int i=0;i<sizeQueue;i++){     
+                                if(queue[i]!=maxPrioTid){
+                                    newQueue[newSizeQueue]         = queue[i];
+                                    newQueuePriority[newSizeQueue] = queuePriority[i];
+                                    newSizeQueue++;
+                                }
+                            }
+                            sizeQueue = newSizeQueue;
+                        
+                        }
+                    } else {
+                        isInquire = true;
+                        inquireFrom = recvmsg[0];
+                    }
+                    break;
+                case MSG_FAILED:
+                    printf("%d: Jest FAILED!!\n", tid);	
+                    failedCount++;
+                    if(isInquire){
+                        locked = false;
+                        lockedTid=-1;
+                        printf("%d: wysylkam RELINQUISH!!\n", tid);	
+                        MPI_Send( sendmsg, 2, MPI_INT, inquireFrom, MSG_RELINQUISH, MPI_COMM_WORLD );
+                                            
+                        if(sizeQueue>0){                                
+                            
+                                int maxPrio = -1;
+                                int maxPrioTid = -1;
+                                for(int i=0;i<sizeQueue;i++){                
+                                    if(queuePriority[i]>maxPrio){
+                                        maxPrio = queuePriority[i];
+                                        maxPrioTid = queue[i];
+                                    }
+                                }
+                                if(maxPrio>-1){      
+                                    locked = true;
+                                    lockedTid=maxPrioTid;
+                                    MPI_Send( sendmsg, 2, MPI_INT, maxPrioTid, MSG_LOCKED, MPI_COMM_WORLD );   
+                                    
+                                    int newQueue[MAX_QUEUE];
+                                    int newQueuePriority[MAX_QUEUE];
+                                    int newSizeQueue = 0;
+                                    
+                                    for(int i=0;i<MAX_QUEUE;i++){
+                                        newQueue[i]=-1;
+                                        newQueuePriority[i]=-1;
+                                    }
+                                    
+                                    for(int i=0;i<sizeQueue;i++){     
+                                        if(queue[i]!=maxPrioTid){
+                                            newQueue[newSizeQueue]         = queue[i];
+                                            newQueuePriority[newSizeQueue] = queuePriority[i];
+                                            newSizeQueue++;
+                                        }
+                                    }
+                                    sizeQueue = newSizeQueue;
+                                
+                                }
                     
+                        }
+                    }
+                    break;
+                case MSG_LOCKED:
+                    printf("%d: Jest LOCKED!!\n", tid);	
+                    myProc[sizeMyProc]           = recvmsg[0];
+                    myProcPriority[sizeMyProc]   = recvmsg[1];
+                    sizeMyProc++;
+                    break;
+                case MSG_RELEASE: {
+                    printf("%d: Jest RELEASE!!\n", tid);	                    
+                    int maxPrio = -1;
+                    int maxPrioTid = -1;
+                    for(int i=0;i<sizeQueue;i++){                
+                        if(queuePriority[i]>maxPrio){
+                            maxPrio = queuePriority[i];
+                            maxPrioTid = queue[i];
+                        }
+                    }
+                    if(maxPrio>-1){      
+                        locked = true;
+                        lockedTid=maxPrioTid;
+                        MPI_Send( sendmsg, 2, MPI_INT, maxPrioTid, MSG_LOCKED, MPI_COMM_WORLD );   
+                        
+                        int newQueue[MAX_QUEUE];
+                        int newQueuePriority[MAX_QUEUE];
+                        int newSizeQueue = 0;
+                        
+                        for(int i=0;i<MAX_QUEUE;i++){
+                            newQueue[i]=-1;
+                            newQueuePriority[i]=-1;
+                        }
+                        
+                        for(int i=0;i<sizeQueue;i++){     
+                            if(queue[i]!=maxPrioTid){
+                                newQueue[newSizeQueue]         = queue[i];
+                                newQueuePriority[newSizeQueue] = queuePriority[i];
+                                newSizeQueue++;
+                            }
+                        }
+                        sizeQueue = newSizeQueue;
+                    
+                    }
+                    break;
+                }               
+                case MSG_RELINQUISH:
+                    printf("%d: Jest RELINQUISH!!\n", tid);	
                     queue[sizeQueue] = recvmsg[0];
                     queuePriority[sizeQueue] = recvmsg[1];
                     sizeQueue++;
-                    if(isMoreImportant){                    
-                        MPI_Send( sendmsg, 2, MPI_INT, lockedTid, MSG_INQUIRE, MPI_COMM_WORLD );
-                    } else {
-                        MPI_Send( sendmsg, 2, MPI_INT, recvmsg[0], MSG_FAILED, MPI_COMM_WORLD );
+                    int newMyProc[MAX_QUEUE];
+                    int newMyProcPriority[MAX_QUEUE];
+                    int newSizeMyProc=0;
+                    for(int i=0;i<MAX_QUEUE;i++){
+                        newMyProc[i]=-1;
+                        newMyProcPriority[i]=-1;
                     }
-                }
-                break;
-            case MSG_INQUIRE:                
-                if(failedCount>1){
-                    MPI_Send( sendmsg, 2, MPI_INT, recvmsg[0], MSG_RELINQUISH, MPI_COMM_WORLD );   
-                } else {
-                    isInquire = true;
-                    inquireFrom = recvmsg[0];
-                }
-                break;
-            case MSG_FAILED:
-                failedCount++;
-                if(isInquire){
-                     MPI_Send( sendmsg, 2, MPI_INT, inquireFrom, MSG_RELINQUISH, MPI_COMM_WORLD );   
-                }
-                break;
-            case MSG_LOCKED:
-                printf("%d: LOCKED\n", tid);
-                myProc[sizeMyProc]           = recvmsg[0];
-                myProcPriority[sizeMyProc]   = recvmsg[1];
-                sizeMyProc++;
-                break;
-            case MSG_RELEASE: {
-                int maxPrio = -1;
-                int maxPrioTid = -1;
-                for(int i=0;i<sizeQueue;i++){                
-                    if(queuePriority[i]>maxPrio){
-                        maxPrio = queuePriority[i];
-                        maxPrioTid = queue[i];
+                    for(int i=0;i<sizeMyProc;i++){     
+                        if(myProc[i]!=recvmsg[0]){
+                            newMyProc[newSizeMyProc]         = myProc[i];
+                            newMyProcPriority[newSizeMyProc] = myProcPriority[i];
+                            newSizeMyProc++;
+                        }
                     }
-                }
-                if(maxPrio>-1){
-                    locked = true;
-                    lockedTid = recvmsg[0];
-                    
-                    MPI_Send( sendmsg, 2, MPI_INT, maxPrioTid, MSG_LOCKED, MPI_COMM_WORLD );
-                }
-                break;
-            }               
-            case MSG_RELINQUISH:
-                queue[sizeQueue] = recvmsg[0];
-                queuePriority[sizeQueue] = recvmsg[1];
-                sizeQueue++;
-                int newMyProc[MAX_QUEUE];
-                int newMyProcPriority[MAX_QUEUE];
-                int newSizeMyProc=0;
-                for(int i=0;i<MAX_QUEUE;i++){
-                    newMyProc[i]=-1;
-                    newMyProcPriority[i]=-1;
-                }
-                for(int i=0;i<sizeMyProc;i++){     
-                    if(myProc[i]!=recvmsg[0]){
-                        newMyProc[newSizeMyProc]         = myProc[i];
-                        newMyProcPriority[newSizeMyProc] = myProcPriority[i];
-                        newSizeMyProc++;
-                    }
-                }
-                for(int i=0;i<MAX_QUEUE;i++){
-                    myProc[i] = newMyProc[i];
-                    newMyProcPriority[i] = newMyProcPriority[i];
-                }                
-                sizeMyProc = newSizeMyProc;
-                break;
+                    for(int i=0;i<MAX_QUEUE;i++){
+                        myProc[i] = newMyProc[i];
+                        myProcPriority[i] = newMyProcPriority[i];
+                    }                
+                    sizeMyProc = newSizeMyProc;
+                    break;
+            }
+            
         }
-        
+        printf("%d: SEKCJA KRYTYCZNA!!! \n", tid);	
+        for(int i=0;i<size;i++){
+            MPI_Send( sendmsg, 2, MPI_INT, i, MSG_RELEASE, MPI_COMM_WORLD );
+        }
     }
-	
 
+    
 
 	MPI_Finalize(); // Musi być w każdym programie na końcu
 }
