@@ -114,7 +114,7 @@ int main(int argc, char **argv)
                         }
                     }
                     break;
-                case MSG_INQUIRE:      
+                case MSG_INQUIRE:
                     if(DEBUG) printf("%d: Jest INQUIRE od %d!!\n", tid, recvmsg[0]);	
                     if(failedCount>0){
                         if(DEBUG) printf("%d: wysylkam RELINQUISH!!\n", tid);	
@@ -168,8 +168,9 @@ int main(int argc, char **argv)
                     }
                     break;
                 case MSG_FAILED:
-                    if(DEBUG) printf("%d: Jest FAILED!!\n", tid);	
+                    if(DEBUG) printf("%d: Jest FAILED od %d!!\n", tid, recvmsg[0]);	
                     failedCount++;
+                                        
                     if(isInquire){
                         locked = false;
                         lockedTid=-1;
@@ -226,7 +227,7 @@ int main(int argc, char **argv)
                     sizeMyProc++;
                     break;
                 case MSG_RELEASE: {
-                    if(DEBUG) printf("%d: Jest RELEASE!!\n", tid);	                    
+                    if(DEBUG) printf("%d: Jest RELEASE od %d!!\n", tid, recvmsg[0]);	                    
                     int maxPrio = -1;
                     int maxPrioTid = -1;
                     for(int i=0;i<sizeQueue;i++){                
