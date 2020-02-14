@@ -5,7 +5,7 @@
 
 #define ROOT 0
 #define MAX_QUEUE 32
-#define SIZE_GROUP 3
+#define SIZE_GROUP 2
 #define DEBUG true
 
 #define MSG_REQUEST 101
@@ -19,8 +19,8 @@ int tid,size;
 MPI_Status status;
 
 int myGroup[SIZE_GROUP];
-int sendmsg[2];
-int recvmsg[2];
+int sendmsg[3];
+int recvmsg[3];
 
 bool locked = false;
 int lockedTid;
@@ -41,6 +41,25 @@ bool canEnter(){
     return sizeMyProc == SIZE_GROUP;
 }
 
+void sendTo(int sendTid, int msg){
+    if(msg==MSG_LOCKED){
+        sendmsg[1] = lockedPriority;
+    } else {
+        sendmsg[1] = sendmsg[2];
+    }
+    sendmsg[2]++;
+    MPI_Send( sendmsg, 3, MPI_INT, sendTid, msg, MPI_COMM_WORLD );
+}
+
+void recvAll(){
+    MPI_Recv(recvmsg, 3, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status); 
+    if(recvmsg[2]>sendmsg[2]){
+        sendmsg[2] = recvmsg[2] + 1;
+    } else {
+        sendmsg[2]++;
+    }
+}
+
 void addToQueue(int procTid, int procPrioity){
     bool pushed = false;
       
@@ -54,29 +73,30 @@ void addToQueue(int procTid, int procPrioity){
     }
                             
     for(int i=0; i<sizeQueue; i++){
-        if(queuePriority[sizeQueue]<procPrioity){
-            newQueue[i] = queue[i];
-            newQueuePriority[i] = queuePriority[i];
+        if(queuePriority[i]<procPrioity){
+            newQueue[newSizeQueue] = queue[i];
+            newQueuePriority[newSizeQueue] = queuePriority[i];
             newSizeQueue++;
         } else if(!pushed) {
-            pushed=true;
+            pushed = true;
             
-            newQueue[i] = procTid;
-            newQueuePriority[i] = procPrioity;            
-            newQueue[i+1] = queue[i];
-            newQueuePriority[i+1] = queuePriority[i];
-            newSizeQueue+=2;
-        } else {                  
-            newQueue[i+1] = queue[i];
-            newQueuePriority[i+1] = queuePriority[i];
+            newQueue[newSizeQueue] = procTid;
+            newQueuePriority[newSizeQueue] = procPrioity;  
+            newSizeQueue++;          
+            newQueue[newSizeQueue] = queue[i];
+            newQueuePriority[newSizeQueue] = queuePriority[i];
+            newSizeQueue++;
+        } else {
+            newQueue[newSizeQueue] = queue[i];
+            newQueuePriority[newSizeQueue] = queuePriority[i];
             newSizeQueue++;
         }
     }
     
-    if(newSizeQueue==0){
-        newQueue[0] = procTid;
-        newQueuePriority[0] = procPrioity;       
-        newSizeQueue=1;
+    if(!pushed){
+        newQueue[newSizeQueue] = procTid;
+        newQueuePriority[newSizeQueue] = procPrioity;       
+        newSizeQueue++;
     }
     
     for(int i=0;i<MAX_QUEUE;i++){
@@ -97,15 +117,55 @@ void removeFirstFromQueue(){
 
 
 void addToMyProc(int procTid, int procPrioity){
-    myProc[sizeMyProc]          = procTid;
-    myProcPriority[sizeMyProc]   = procPrioity;
-    sizeMyProc++;
+    bool isInProc = false;
+    for(int i=0;i<sizeMyProc; i++){
+        if(myProc[i]==procTid)
+            isInProc = true;
+    }
+    if(!isInProc){
+        myProc[sizeMyProc]          = procTid;
+        myProcPriority[sizeMyProc]   = procPrioity;
+        sizeMyProc++;
+    }
+}
+
+void removeFromMyProc(int procTid){
+    int newMyProc[MAX_QUEUE];
+    int newMyProcPriority[MAX_QUEUE];
+    int newSizeMyProc = 0;
+
+    for(int i=0;i<MAX_QUEUE;i++){
+        newMyProc[i]=-1;
+        newMyProcPriority[i]=-1;
+    }
+    
+    for(int i=0;i<sizeMyProc;i++){
+        if(myProc[i]!=procTid){
+            newMyProc[newSizeMyProc]=myProc[i];
+            newMyProcPriority[newSizeMyProc]=myProcPriority[i];
+            newSizeMyProc++;
+        }       
+    }  
+    
+    for(int i=0;i<MAX_QUEUE;i++){
+        myProc[i] = newMyProc[i];
+        myProcPriority[i] = newMyProcPriority[i];
+    }
+    sizeMyProc = newSizeMyProc;
 }
 
 void addToInquires(int procTid, int procPrioity){
-    inquires[sizeInquires]          = procTid;
-    inquiresPriority[sizeInquires]  = procPrioity;
-    sizeInquires++;
+    bool isInInq = false;
+    for(int i=0;i<sizeInquires; i++){
+        if(inquires[i]==procTid)
+            isInInq = true;
+    }
+    if(!isInInq){
+        inquires[sizeInquires]          = procTid;
+        inquiresPriority[sizeInquires]  = procPrioity;
+        sizeInquires++;
+    }
+    
 }
 
 void clearInquires(){
@@ -125,59 +185,70 @@ void clearMyProc(){
 }
 
 void check(){
-    if(failedReceived && canEnter() == false){
-        locked = false;
-        lockedTid=-1;//nie wiem czy git
+    if(sizeInquires==SIZE_GROUP)failedReceived=true;
+    if(failedReceived && !canEnter()){
         for(int i=0; i<sizeInquires; i++){
-            
-            MPI_Send( sendmsg, 2, MPI_INT, inquires[i], MSG_RELINQUISH, MPI_COMM_WORLD );
+            removeFromMyProc(inquires[i]);
+            sendTo(inquires[i], MSG_RELINQUISH);
         }
+        //failedReceived=false;
         clearInquires();
     }
 }
 
 void onRecv(){
-    MPI_Recv(recvmsg, 2, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status); 
-      
+    recvAll();
     switch(status.MPI_TAG){
         case MSG_REQUEST:
-            if(DEBUG) printf("%d: Jest REQUEST od %d !!\n", tid, recvmsg[0]);	
+            if(DEBUG) printf("%d: Jest REQUEST od %d (%d)!!\n", tid, recvmsg[0], recvmsg[1]);	
             if(!locked){
                 locked = true;
                 lockedTid = recvmsg[0];
                 lockedPriority = recvmsg[1];
                 
-                MPI_Send( sendmsg, 2, MPI_INT, recvmsg[0], MSG_LOCKED, MPI_COMM_WORLD );
+                sendTo(recvmsg[0], MSG_LOCKED); 
             } else {
                 addToQueue(recvmsg[0], recvmsg[1]);
-                /*for(int i=0;i<sizeQueue;i++){
-                    printf("%d: [%d] =  %d \n", tid, i, queue[i]);
+                
+                bool isMoreImportant = false;
+                for(int i=0; i<sizeMyProc; i++) {
+                    if(recvmsg[1] < myProcPriority[i]) {
+                        isMoreImportant=true;
+                    }
                 }
-                break;*/
-                if(lockedPriority>recvmsg[1] && queuePriority[0]==recvmsg[1]){
-                     MPI_Send( sendmsg, 2, MPI_INT, lockedTid, MSG_INQUIRE, MPI_COMM_WORLD );
+                if(lockedPriority>recvmsg[1]){
+                    isMoreImportant = true;
+                }
+                
+                /*if(lockedPriority>recvmsg[1]){
+                    isMoreImportant = true;
+                } else if(queuePriority[0]!=recvmsg[1]){
+                    isMoreImportant=true;
+                }*/
+                
+                if(isMoreImportant){
+                    sendTo(lockedTid, MSG_INQUIRE);
                 } else {
-                    MPI_Send( sendmsg, 2, MPI_INT, recvmsg[0], MSG_FAILED, MPI_COMM_WORLD );
-                     
-                }  
+                    sendTo(recvmsg[0], MSG_FAILED);
+                }
             }
             break;
         case MSG_INQUIRE:
-            if(DEBUG) printf("%d: Jest INQUIRE od %d!!\n", tid, recvmsg[0]);	
+            if(DEBUG) printf("%d: Jest INQUIRE od %d (%d)!!\n", tid, recvmsg[0], recvmsg[1]);	
             addToInquires(recvmsg[0], recvmsg[1]);
             check();
             break;
         case MSG_FAILED:
-            if(DEBUG) printf("%d: Jest FAILED od %d!!\n", tid, recvmsg[0]);	
+            if(DEBUG) printf("%d: Jest FAILED od %d (%d)!!\n", tid, recvmsg[0], recvmsg[1]);	
             failedReceived = true;
             check();
             break;
         case MSG_LOCKED:
-            if(DEBUG) printf("%d: Jest LOCKED od %d !!\n", tid, recvmsg[0]);	
+            if(DEBUG) printf("%d: Jest LOCKED od %d (%d)!!\n", tid, recvmsg[0], recvmsg[1]);
             addToMyProc(recvmsg[0], recvmsg[1]);
             break;
         case MSG_RELEASE: {
-            if(DEBUG) printf("%d: Jest RELEASE od %d!!\n", tid, recvmsg[0]);                  
+            if(DEBUG) printf("%d: Jest RELEASE od %d (%d)!!\n", tid, recvmsg[0], recvmsg[1]);                  
             locked = false;
             lockedTid = -1;
             lockedPriority = -1;
@@ -185,20 +256,20 @@ void onRecv(){
                 locked = true;
                 lockedTid = queue[0];
                 lockedPriority = queuePriority[0];
-                MPI_Send( sendmsg, 2, MPI_INT, queue[0], MSG_LOCKED, MPI_COMM_WORLD );
-                removeFirstFromQueue();                
-            }     
+                sendTo(queue[0], MSG_LOCKED); 
+                removeFirstFromQueue();
+            }
             break;
-        }               
+        }
         case MSG_RELINQUISH:
-            if(DEBUG) printf("%d: Jest RELINQUISH od %d!!\n", tid, recvmsg[0]);	
+            if(DEBUG) printf("%d: Jest RELINQUISH od %d (%d)!!\n", tid, recvmsg[0], recvmsg[1]);
             addToQueue(lockedTid, lockedPriority);
             if(sizeQueue>0){
                 locked = true;
                 lockedTid = queue[0];
                 lockedPriority = queuePriority[0];
-                MPI_Send( sendmsg, 2, MPI_INT, queue[0], MSG_LOCKED, MPI_COMM_WORLD );
-                removeFirstFromQueue();                
+                sendTo(queue[0], MSG_LOCKED); 
+                removeFirstFromQueue();
             } else {
                 locked = false;
                 lockedTid = -1;
@@ -211,21 +282,21 @@ void onRecv(){
 void enterCriticalSection(){
     for(int i=0;i<size;i++){
         if(i == myGroup[0] || i == myGroup[1] || i == myGroup[2])
-            MPI_Send( sendmsg, 2, MPI_INT, i, MSG_REQUEST, MPI_COMM_WORLD );
+            sendTo(i, MSG_REQUEST);
     }
     
     while(!canEnter()){
         onRecv();
-        sendmsg[1]++;
     }
     
-    printf("%d: SEKCJA KRYTYCZNA! ! ! ! \n", tid);
+    printf("%d: ==== SEKCJA KRYTYCZNA ====  \n", tid);
     
     failedReceived = false;
     clearMyProc();
+    sleep(2);
     for(int i=0;i<size;i++){
         if(i == myGroup[0] || i == myGroup[1] || i == myGroup[2])
-            MPI_Send( sendmsg, 2, MPI_INT, i, MSG_RELEASE, MPI_COMM_WORLD );
+            sendTo(i, MSG_RELEASE);
     }    
 }
 
@@ -234,10 +305,10 @@ int main(int argc, char **argv)
 {
 	MPI_Init(&argc, &argv); //Musi być w każdym programie na początku
 
-	printf("Checking!\n");
+	if(DEBUG) printf("Checking!\n");
 	MPI_Comm_size( MPI_COMM_WORLD, &size );
 	MPI_Comm_rank( MPI_COMM_WORLD, &tid );
-	printf("My id is %d from %d\n",tid, size);
+	if(DEBUG) printf("My id is %d from %d\n",tid, size);
 
    
     myGroup[0] = tid; // ja
@@ -247,14 +318,16 @@ int main(int argc, char **argv)
     else
         myGroup[1] = 0;
     
+    /*
     if(tid-1>=0)
-        myGroup[2] = tid-1; // poprzedni
+        myGroup[2] = tid; // poprzedni
     else
-        myGroup[2] = size-1;
+        myGroup[2] = tid;*/
     
     
 	sendmsg[0] = tid;
 	sendmsg[1] = tid;
+	sendmsg[2] = tid;
     
     for(int i=0;i<MAX_QUEUE;i++){
         myProc[i]=-1;
@@ -264,6 +337,19 @@ int main(int argc, char **argv)
         inquires[i] = -1;
         inquiresPriority[i] = -1;
     }
+    
+    /*if(tid==0){
+        addToMyProc(0,0);
+        addToMyProc(3,3);
+        addToMyProc(2,2);
+        addToMyProc(1,1);
+        removeFromMyProc(2);
+        
+        for(int i=0; i<sizeMyProc;i++){
+            printf("%d: %d", i, myProc[i]);
+        }
+    }*/
+  
         
     while(true)
         enterCriticalSection();

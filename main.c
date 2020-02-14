@@ -15,10 +15,27 @@
 #define MSG_INQUIRE 105
 #define MSG_RELINQUISH 106
 
+int tid,size;
+MPI_Status status;
+int sendmsg[2];
+int recvmsg[2];
+    
+void sendTo(int sendTid, int msg){
+    sendmsg[1]++;
+    MPI_Send( sendmsg, 2, MPI_INT, sendTid, msg, MPI_COMM_WORLD );
+}
+
+void recvAll(){
+    MPI_Recv(recvmsg, 2, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status); 
+    if(recvmsg[1]>sendmsg[1]){
+        sendmsg[1] = recvmsg[1] + 1;
+    } else {
+        sendmsg[1]++;
+    }
+}
+
 int main(int argc, char **argv)
 {
-	int tid,size;
-	MPI_Status status;
 
 	MPI_Init(&argc, &argv); //Musi być w każdym programie na początku
 
@@ -41,8 +58,6 @@ int main(int argc, char **argv)
         myGroup[2] = size-1;
         
     
-	int sendmsg[2];
-    int recvmsg[2];
 
 	bool locked = false;
     int lockedTid;
@@ -66,13 +81,15 @@ int main(int argc, char **argv)
     
 
 	sendmsg[0] = tid;
-	sendmsg[1] = priority;
+	sendmsg[1] = 0;
 	
      
+        
     while(true){
        for(int i=0;i<size;i++){
             if(i == myGroup[0] || i == myGroup[1] || i == myGroup[2])
-                MPI_Send( sendmsg, 2, MPI_INT, i, MSG_REQUEST, MPI_COMM_WORLD );
+                sendTo(i, MSG_REQUEST);
+//                 MPI_Send( sendmsg, 2, MPI_INT, i, MSG_REQUEST, MPI_COMM_WORLD );
         }
         
         while(sizeMyProc!=SIZE_GROUP){
@@ -85,11 +102,11 @@ int main(int argc, char **argv)
                     if(!locked){
                         locked = true;
                         lockedTid = recvmsg[0];
-                        
-                        MPI_Send( sendmsg, 2, MPI_INT, recvmsg[0], MSG_LOCKED, MPI_COMM_WORLD );
+                        sendTo(recvmsg[0], MSG_LOCKED);
+//                         MPI_Send( sendmsg, 2, MPI_INT, recvmsg[0], MSG_LOCKED, MPI_COMM_WORLD );
                     } else {
                         bool isMoreImportant = true;
-                        for(int i=0;i<sizeMyProc;i++){                
+                        for(int i=0;i<sizeMyProc;i++){
                             if(myProcPriority[i]>recvmsg[1]){
                                 isMoreImportant = false;
                             }
@@ -107,10 +124,12 @@ int main(int argc, char **argv)
                             sizeQueue++;
                         }
                         
-                        if(isMoreImportant){                    
-                            MPI_Send( sendmsg, 2, MPI_INT, lockedTid, MSG_INQUIRE, MPI_COMM_WORLD );
+                        if(isMoreImportant){
+                            sendTo(lockedTid, MSG_INQUIRE);
+//                             MPI_Send( sendmsg, 2, MPI_INT, lockedTid, MSG_INQUIRE, MPI_COMM_WORLD );
                         } else {
-                            MPI_Send( sendmsg, 2, MPI_INT, recvmsg[0], MSG_FAILED, MPI_COMM_WORLD );
+                            sendTo(recvmsg[0], MSG_FAILED);
+//                             MPI_Send( sendmsg, 2, MPI_INT, recvmsg[0], MSG_FAILED, MPI_COMM_WORLD );
                         }
                     }
                     break;
@@ -157,11 +176,12 @@ int main(int argc, char **argv)
                             }
                             sizeQueue = newSizeQueue;
                             
-                            MPI_Send( sendmsg, 2, MPI_INT, maxPrioTid, MSG_LOCKED, MPI_COMM_WORLD ); 
+                            sendTo(maxPrioTid, MSG_LOCKED);
+//                             MPI_Send( sendmsg, 2, MPI_INT, maxPrioTid, MSG_LOCKED, MPI_COMM_WORLD ); 
                         
                         }
-                        
-                        MPI_Send( sendmsg, 2, MPI_INT, recvmsg[0], MSG_RELINQUISH, MPI_COMM_WORLD );   
+                        sendTo(recvmsg[0], MSG_RELINQUISH);
+//                         MPI_Send( sendmsg, 2, MPI_INT, recvmsg[0], MSG_RELINQUISH, MPI_COMM_WORLD );   
                     } else {
                         isInquire = true;
                         inquireFrom = recvmsg[0];
@@ -175,7 +195,8 @@ int main(int argc, char **argv)
                         locked = false;
                         lockedTid=-1;
                         if(DEBUG) printf("%d: wysylkam RELINQUISH!!\n", tid);	
-                        MPI_Send( sendmsg, 2, MPI_INT, inquireFrom, MSG_RELINQUISH, MPI_COMM_WORLD );
+                        sendTo(inquireFrom, MSG_RELINQUISH);
+//                         MPI_Send( sendmsg, 2, MPI_INT, inquireFrom, MSG_RELINQUISH, MPI_COMM_WORLD );
                                             
                         if(sizeQueue>0){                                
                             
@@ -213,7 +234,10 @@ int main(int argc, char **argv)
                                     }
                                     sizeQueue = newSizeQueue;
                                     
-                                    MPI_Send( sendmsg, 2, MPI_INT, maxPrioTid, MSG_LOCKED, MPI_COMM_WORLD );  
+                                    
+                                    sendTo(maxPrioTid, MSG_LOCKED);
+                                    
+//                                     MPI_Send( sendmsg, 2, MPI_INT, maxPrioTid, MSG_LOCKED, MPI_COMM_WORLD );  
                                 
                                 }
                     
@@ -239,7 +263,8 @@ int main(int argc, char **argv)
                     if(maxPrio>-1){
                         locked = true;
                         lockedTid=maxPrioTid;
-                        MPI_Send( sendmsg, 2, MPI_INT, maxPrioTid, MSG_LOCKED, MPI_COMM_WORLD );   
+//                         MPI_Send( sendmsg, 2, MPI_INT, maxPrioTid, MSG_LOCKED, MPI_COMM_WORLD );   
+                        sendTo(maxPrioTid, MSG_LOCKED);
                         
                         int newQueue[MAX_QUEUE];
                         int newQueuePriority[MAX_QUEUE];
@@ -321,7 +346,8 @@ int main(int argc, char **argv)
                     
         for(int i=0;i<size;i++){
             if((i == myGroup[0] || i == myGroup[1] || i == myGroup[2]))
-                MPI_Send( sendmsg, 2, MPI_INT, i, MSG_RELEASE, MPI_COMM_WORLD );
+                sendTo(i, MSG_RELEASE);
+//                 MPI_Send( sendmsg, 2, MPI_INT, i, MSG_RELEASE, MPI_COMM_WORLD );
         }
     }
 
