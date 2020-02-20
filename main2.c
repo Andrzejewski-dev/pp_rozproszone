@@ -2,10 +2,11 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <math.h>
 
 #define ROOT 0
 #define MAX_QUEUE 32
-#define SIZE_GROUP 2
+#define SIZE_GROUP 3
 #define DEBUG true
 
 #define MSG_REQUEST 101
@@ -300,6 +301,67 @@ void enterCriticalSection(){
     }    
 }
 
+int k;
+int grupy[255][255];
+int ileRazyTab[255][2];
+void bubblesort(int table[][2], int size2)
+{
+	int i, j;
+	int temp[2];
+	for (i = 0; i<size2-1; i++)
+    {
+		for (j=0; j<size2-1-i; j++)
+		{
+			if (table[j][1] < table[j+1][1])
+			{
+				temp[0] = table[j+1][0];
+				temp[1] = table[j+1][1];
+				table[j+1][0] = table[j][0];
+				table[j+1][1] = table[j][1];
+				table[j][0] = temp[0];
+				table[j][1] = temp[1];
+			}
+		}
+    }
+}
+
+int getLiczba(int without[], int withoutsize){
+    int liczba=-1;
+    for(int i=0;i<size;i++){
+        bool jest = false;
+        for(int j=0;j<withoutsize;j++){
+            if(ileRazyTab[i][0]==without[j]){
+                jest = true;
+            }
+            
+        }
+        if(!jest && ileRazyTab[i][1]>0){
+            ileRazyTab[i][1]--;
+            liczba = ileRazyTab[i][0];
+            bubblesort(ileRazyTab, size);
+            return liczba;
+        }
+    }
+    printf("cos jest nie tak!");
+    return -1;
+}
+
+void generateGroup(){
+    for(int i=0;i<size;i++){
+        ileRazyTab[i][0]=i;
+        ileRazyTab[i][1]=k-1;
+    }
+
+    bubblesort(ileRazyTab, size);
+    
+    for(int i=0;i<size;i++){
+        grupy[i][0] = i;
+        for(int j=1;j<k;j++){
+            grupy[i][j] = getLiczba(grupy[i], j);
+        }
+    }
+    
+}
 
 int main(int argc, char **argv)
 {
@@ -310,20 +372,28 @@ int main(int argc, char **argv)
 	MPI_Comm_rank( MPI_COMM_WORLD, &tid );
 	if(DEBUG) printf("My id is %d from %d\n",tid, size);
 
-   
-    myGroup[0] = tid; // ja
     
-    if(tid+1<size)
-        myGroup[1] = tid+1; // nastepny
-    else
-        myGroup[1] = 0;
+    float k2 = (1.0+sqrt(4.0*size-3.0))/2.0;
+    k = k2;
+    float roznica = k-k2;
+    if(roznica!=0){
+        printf("Nie można użyc dla tylu procesów dla algorytmu maekawa. Spróbuj np 3, 7, 13, 21, 31, 43, 57, 73, 91, 111 procesów.");
+        return 0;
+    }
     
-    /*
-    if(tid-1>=0)
-        myGroup[2] = tid; // poprzedni
-    else
-        myGroup[2] = tid;*/
+    generateGroup();
     
+    for(int i=0;i<size;i++){
+        for(int j=0;j<k;j++){
+           printf("%d ", grupy[i][j] );
+        }
+        printf("\n");
+    }
+    
+    myGroup[0] = grupy[tid][0];
+    myGroup[1] = grupy[tid][1];
+    myGroup[2] = grupy[tid][2];
+        
     
 	sendmsg[0] = tid;
 	sendmsg[1] = tid;
@@ -337,19 +407,7 @@ int main(int argc, char **argv)
         inquires[i] = -1;
         inquiresPriority[i] = -1;
     }
-    
-    /*if(tid==0){
-        addToMyProc(0,0);
-        addToMyProc(3,3);
-        addToMyProc(2,2);
-        addToMyProc(1,1);
-        removeFromMyProc(2);
-        
-        for(int i=0; i<sizeMyProc;i++){
-            printf("%d: %d", i, myProc[i]);
-        }
-    }*/
-  
+      
         
     while(true)
         enterCriticalSection();
